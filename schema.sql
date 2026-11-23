@@ -3,6 +3,7 @@
 
 PRAGMA foreign_keys = ON;
 
+DROP TABLE IF EXISTS reviews;
 DROP TABLE IF EXISTS login_attempts;
 DROP TABLE IF EXISTS favourites;
 DROP TABLE IF EXISTS messages;
@@ -36,6 +37,8 @@ CREATE TABLE listings (
     status      TEXT    NOT NULL DEFAULT 'active'
                         CHECK (status IN ('active', 'sold', 'hidden')),
     image_path  TEXT,                                         -- photo, e.g. uploads/ab12.jpg (file lives in static/)
+    course      TEXT,                                         -- course code the item is for, e.g. MATH101 (campus filter)
+    pickup_place TEXT,                                        -- where on campus the deal happens, e.g. Library
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -58,6 +61,19 @@ CREATE TABLE favourites (
     UNIQUE (user_id, listing_id)      -- the same listing cannot be saved twice
 );
 
+-- Seller reviews: a buyer rates the seller after a sale (rating 1-5 + written feedback)
+CREATE TABLE reviews (
+    review_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id  INTEGER NOT NULL REFERENCES listings(listing_id) ON DELETE CASCADE,
+    seller_id   INTEGER NOT NULL REFERENCES users(user_id)       ON DELETE CASCADE,
+    reviewer_id INTEGER NOT NULL REFERENCES users(user_id)       ON DELETE CASCADE,
+    rating      INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    comment     TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (listing_id, reviewer_id),          -- one review per buyer per deal
+    CHECK (seller_id <> reviewer_id)           -- nobody reviews themselves
+);
+
 -- Failed logins, used to lock an email after too many wrong passwords (brute-force protection)
 CREATE TABLE login_attempts (
     attempt_id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,3 +90,5 @@ CREATE INDEX idx_favourites_user          ON favourites(user_id);
 CREATE INDEX idx_login_attempts_email    ON login_attempts(email, attempted_at);
 CREATE INDEX idx_messages_sender         ON messages(sender_id, sent_at);
 CREATE INDEX idx_messages_unread         ON messages(receiver_id, is_read);
+CREATE INDEX idx_reviews_seller           ON reviews(seller_id);
+CREATE INDEX idx_listings_course         ON listings(course);

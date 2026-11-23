@@ -11,11 +11,11 @@ Open http://127.0.0.1:5000 . The database `marketplace.db` is created on first s
 Test accounts: aruzhan@kbtu.kz, dias@kbtu.kz, madina@kbtu.kz ... password `password123`.
 
 ## Tests
-    python -m pytest -v      # 63 test cases, TC-01 ... TC-63
+    python -m pytest -v      # 77 test cases, TC-01 ... TC-77
 
 ## Files
 - app.py — routes (Flask), one function per user story (US-1 ... US-7)
-- schema.sql — tables (users, categories, listings, messages, favourites), keys, constraints;  seed.sql — test data
+- schema.sql — tables (users, categories, listings, messages, favourites, reviews), keys, constraints;  seed.sql — test data
 - templates/ — HTML pages (_ui.html = inline SVG icons, listing card, category sections)
 - test_app.py — automated tests
 
@@ -34,6 +34,18 @@ When a listing is deleted or its photo is replaced, the old file is deleted too.
 - `/inbox` lists all conversations (listing + other person, last message, number of new messages). Click one to open the listing chat.
 - `messages.is_read`: new message = 0; it becomes 1 when the receiver opens the listing page. New messages are marked "New" on that visit.
 - An old `marketplace.db` is upgraded automatically at start (`migrate_db()` adds `image_path` and `is_read`); existing data is kept.
+
+## Ratings and feedback (reviews)
+- After a listing is marked **sold**, a buyer gives the seller 1-5 stars and optional written feedback (max 500 characters) on the listing page.
+- Fraud protection: only a student who **messaged the seller about that item** can review, only once per listing, never the seller themselves (table `reviews`: UNIQUE (listing_id, reviewer_id), CHECK rating 1-5, CHECK seller <> reviewer).
+- The average rating and number of reviews appear on every listing card and listing page; `/seller/<id>` shows the seller profile: average, star distribution, all feedback, sold count, active listings.
+- Home page: sort "Best-rated sellers".
+
+## Campus features (what makes it different from OLX / Kaspi)
+- **Course tag** (`listings.course`, e.g. MATH101): "Any course" filter on the home page and clickable tag on the listing, so a student finds books and notes for exactly their course.
+- **Pickup place** (`listings.pickup_place`, e.g. Library, Dorm 2): where on campus to meet.
+- Only verified `@kbtu.kz` students trade; every seller has a public trust profile.
+- An old `marketplace.db` is upgraded automatically (`migrate_db()` adds `course` and `pickup_place`, `update_schema()` adds `reviews`); data is kept.
 
 ## Security
 - Registration only with `@kbtu.kz` email; student ID must match `24B031936` format.
@@ -54,10 +66,13 @@ average / lowest / highest price per category, top 3 listings saved to favourite
 - TC-39 — CSRF: POST without a valid token is rejected (400).
 - TC-40 ... TC-44 — photos: upload, fake image rejected, no photo, replace / remove, file deleted with the listing.
 - TC-45 ... TC-48 — messages: unread counter, opening marks as read, inbox shows only my chats, inbox needs login.
-- TC-49 ... TC-51 — sorting, new/used filter, safe schema update (team).
-- TC-52 ... TC-61 — old DB upgrade, image type by bytes, too big photo, register validation, safe `next` redirect, message edge cases, invalid category, edit validation, 404s, inbox grouping.
-- TC-62 — end-to-end: register -> post listing with photo -> search -> message -> reply -> mark as sold -> Stats.
-- TC-63 — sort / filter ignore bad values (SQL injection attempt does nothing).
+- TC-49 ... TC-51 — sorting, condition filter, schema update keeps users.
+- TC-52 ... TC-59 — reviews: buyer can review a sold item; not before sale; seller cannot review self; stranger cannot; one per deal; rating 1-5; login + CSRF; averages on seller page and cards.
+- TC-60 ... TC-62 — course / pickup place saved and filtered; invalid course rejected; sort by best-rated sellers.
+- TC-63 ... TC-72 — old DB upgrade, image type by bytes, too big photo, register validation, safe `next` redirect, message edge cases, invalid category, edit validation, 404s, inbox grouping.
+- TC-73 — end-to-end: register -> post listing with photo -> search -> message -> reply -> mark as sold -> Stats.
+- TC-74 — sort / filter ignore bad values (SQL injection attempt does nothing).
+- TC-75 ... TC-77 — review text too long, campus fields validation (create + edit), registration page.
 
 ## Continuous integration
 GitHub Actions (`.github/workflows/tests.yml`) runs all tests on every push and pull request and fails if coverage is below 95%:

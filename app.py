@@ -30,6 +30,10 @@ LOGIN_WINDOW_MIN = 15          # ... within this many minutes, then the account 
 MAX_MESSAGES = 5               # messages a user may send ...
 MESSAGE_WINDOW_SEC = 60        # ... within this many seconds
 MAX_MESSAGE_LEN = 1000
+MAX_REVIEW_LEN = 500          # feedback text under a rating
+MAX_COURSE_LEN = 12
+MAX_PICKUP_LEN = 40
+PICKUP_SUGGESTIONS = ["Library", "Main hall", "Canteen", "Dorm 1", "Dorm 2", "Sports hall"]
 MAX_TITLE_LEN = 100           # BUG-03: very long titles broke the listing page on phones
 app.config["CSRF_ENABLED"] = True   # tests switch it off; test_tc39 checks it
 
@@ -99,6 +103,9 @@ def migrate_db():
         if message_cols and "is_read" not in message_cols:
             db.execute("ALTER TABLE messages ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0 CHECK (is_read IN (0, 1))")
             db.execute("UPDATE messages SET is_read = 1")      # messages that already exist count as read
+        for col in ("course", "pickup_place"):
+            if listing_cols and col not in listing_cols:
+                db.execute(f"ALTER TABLE listings ADD COLUMN {col} TEXT")
         if message_cols:
             db.execute("CREATE INDEX IF NOT EXISTS idx_messages_unread ON messages(receiver_id, is_read)")
         db.commit()
@@ -200,6 +207,46 @@ def login_required(view):
     return wrapped
 
 
+# ---------- ratings ----------
+# SQL fragments: average rating and number of reviews of the seller of listing `l`
+SELLER_AVG_SQL = "(SELECT ROUND(AVG(r.rating), 1) FROM reviews r WHERE r.seller_id = l.seller_id) AS seller_avg"
+SELLER_N_SQL = "(SELECT COUNT(*) FROM reviews r WHERE r.seller_id = l.seller_id) AS seller_n"
+
+
+def clean_course(text):
+    """'math 101' -> 'MATH101'. Returns (value, error)."""
+    text = (text or "").strip().upper().replace(" ", "")
+    if not text:
+        return None, None
+    if len(text) > MAX_COURSE_LEN or not re.fullmatch(r"[A-Z0-9-]+", text):
+        return None, "Course code: letters and digits only, e.g. MATH101."
+    return text, None
+
+
+def clean_pickup(text):
+    text = (text or "").strip()
+    if len(text) > MAX_PICKUP_LEN:
+        return None, f"Pickup place must be at most {MAX_PICKUP_LEN} characters."
+    return (text or None), None
+
+
+def can_review(db, item, uid):
+    """A student may review the seller only for a SOLD listing, only if they talked to the seller about it,
+    and only once per listing. Returns (True, '') or (False, reason)."""
+    if not uid or uid == item["seller_id"]:
+        return False, "Only buyers can review."
+    if item["status"] != "sold":
+        return False, "You can review the seller after the item is sold."
+    talked = db.execute("SELECT 1 FROM messages WHERE listing_id = ? AND sender_id = ? LIMIT 1",
+                        (item["listing_id"], uid)).fetchone()
+    if not talked:
+        return False, "Only students who messaged the seller about this item can review."
+    if db.execute("SELECT 1 FROM reviews WHERE listing_id = ? AND reviewer_id = ?",
+                  (item["listing_id"], uid)).fetchone():
+        return False, "You already reviewed this deal."
+    return True, ""
+
+
 # ---------- US-4: search ----------
 
 @app.route("/")
@@ -211,7 +258,8 @@ def index():
     condition = request.args.get("condition", "")
     sort = request.args.get("sort", "price_asc")
 
-    sql = """SELECT l.*, c.name AS category, u.full_name AS seller
+    course = request.args.get("course", "").strip().upper().replace(" ", "")
+    sql = f"""SELECT l.*, c.name AS category, u.full_name AS seller, {SELLER_AVG_SQL}, {SELLER_N_SQL}
              FROM listings l
              JOIN categories c ON c.category_id = l.category_id
              JOIN users u ON u.user_id = l.seller_id
@@ -229,9 +277,13 @@ def index():
     if condition in ("new", "used"):
         sql += " AND l.condition = ?"
         params.append(condition)
+    if course:
+        sql += " AND l.course = ?"
+        params.append(course)
     # only these fixed values can go into ORDER BY (user text is never put into the SQL)
     order = {"price_asc": "l.price ASC", "price_desc": "l.price DESC",
-             "newest": "l.created_at DESC, l.listing_id DESC"}
+             "newest": "l.created_at DESC, l.listing_id DESC",
+             "rating": "seller_avg IS NULL, seller_avg DESC, l.price ASC"}
     if sort not in order:
         sort = "price_asc"
     sql += " ORDER BY " + order[sort]
@@ -242,10 +294,12 @@ def index():
         """SELECT c.*, COUNT(l.listing_id) AS n FROM categories c
            LEFT JOIN listings l ON l.category_id = c.category_id AND l.status = 'active'
            GROUP BY c.category_id ORDER BY c.name""").fetchall()
-    grouped = not (q or category or max_price or condition or sort != "price_asc")   # home page = sections by category
+    courses = [r[0] for r in db.execute(
+        "SELECT DISTINCT course FROM listings WHERE status = 'active' AND course IS NOT NULL ORDER BY course")]
+    grouped = not (q or category or max_price or condition or course or sort != "price_asc")   # home page = sections by category
     return render_template("index.html", listings=listings, categories=categories,
                            q=q, category=category, max_price=max_price, grouped=grouped,
-                           condition=condition, sort=sort)
+                           condition=condition, sort=sort, course=course, courses=courses)
 
 
 # ---------- validation helpers ----------
@@ -353,35 +407,42 @@ def new_listing():
         title, price = f["title"].strip(), f["price"].strip()
         if not title or not price.isdigit():
             flash("Title is required and price must be a whole number of tenge, 0 or more.")
-            return render_template("new_listing.html", categories=categories)
+            return render_template("new_listing.html", categories=categories, suggestions=PICKUP_SUGGESTIONS)
         if len(title) > MAX_TITLE_LEN:  # BUG-03
             flash(f"Title must be at most {MAX_TITLE_LEN} characters.")
-            return render_template("new_listing.html", categories=categories)
+            return render_template("new_listing.html", categories=categories, suggestions=PICKUP_SUGGESTIONS)
+        course, err = clean_course(f.get("course"))
+        pickup, err2 = clean_pickup(f.get("pickup_place"))
+        if err or err2:
+            flash(err or err2)
+            return render_template("new_listing.html", categories=categories, suggestions=PICKUP_SUGGESTIONS)
         photo_path, photo_error = save_photo(request.files.get("photo"))
         if photo_error:
             flash(photo_error)
-            return render_template("new_listing.html", categories=categories)
+            return render_template("new_listing.html", categories=categories, suggestions=PICKUP_SUGGESTIONS)
         try:
             cur = db.execute(
-                """INSERT INTO listings (seller_id, category_id, title, description, price, condition, image_path)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO listings (seller_id, category_id, title, description, price, condition, image_path,
+                                         course, pickup_place)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (session["user_id"], f["category_id"], title, f["description"].strip(),
-                 int(price), f["condition"], photo_path))
+                 int(price), f["condition"], photo_path, course, pickup))
             db.commit()
         except sqlite3.IntegrityError:
             delete_photo(photo_path)
             flash("Invalid category or condition.")
-            return render_template("new_listing.html", categories=categories)
+            return render_template("new_listing.html", categories=categories, suggestions=PICKUP_SUGGESTIONS)
         flash("Listing published.")
         return redirect(url_for("listing", listing_id=cur.lastrowid))
-    return render_template("new_listing.html", categories=categories)
+    return render_template("new_listing.html", categories=categories, suggestions=PICKUP_SUGGESTIONS)
 
 
 # ---------- listing page + US-5 messages ----------
 
 def get_listing(listing_id):
     row = get_db().execute(
-        """SELECT l.*, c.name AS category, u.full_name AS seller, u.email AS seller_email
+        f"""SELECT l.*, c.name AS category, u.full_name AS seller, u.email AS seller_email,
+                  {SELLER_AVG_SQL}, {SELLER_N_SQL}
            FROM listings l JOIN categories c ON c.category_id = l.category_id
            JOIN users u ON u.user_id = l.seller_id WHERE l.listing_id = ?""",
         (listing_id,)).fetchone()
@@ -444,8 +505,13 @@ def listing(listing_id):
         db.commit()
     # how many students saved this listing
     saved_by = db.execute("SELECT COUNT(*) FROM favourites WHERE listing_id = ?", (listing_id,)).fetchone()[0]
+    may_review, review_note = can_review(db, item, uid)
+    reviews = db.execute(
+        """SELECT r.*, u.full_name AS reviewer FROM reviews r JOIN users u ON u.user_id = r.reviewer_id
+           WHERE r.listing_id = ? ORDER BY r.review_id DESC""", (listing_id,)).fetchall()
     return render_template("listing.html", item=item, messages=messages, buyers=buyers, saved_by=saved_by,
-                           buyer_id=request.args.get("buyer", type=int))
+                           buyer_id=request.args.get("buyer", type=int),
+                           may_review=may_review, review_note=review_note, reviews=reviews)
 
 
 # ---------- inbox: all my conversations ----------
@@ -506,14 +572,19 @@ def edit_listing(listing_id):
         title, price = f["title"].strip(), f["price"].strip()
         if not title or not price.isdigit():
             flash("Title is required and price must be a whole number of tenge, 0 or more.")
-            return render_template("new_listing.html", categories=categories, item=item)
+            return render_template("new_listing.html", categories=categories, item=item, suggestions=PICKUP_SUGGESTIONS)
         if len(title) > MAX_TITLE_LEN:  # BUG-03
             flash(f"Title must be at most {MAX_TITLE_LEN} characters.")
-            return render_template("new_listing.html", categories=categories, item=item)
+            return render_template("new_listing.html", categories=categories, item=item, suggestions=PICKUP_SUGGESTIONS)
+        course, err = clean_course(f.get("course"))
+        pickup, err2 = clean_pickup(f.get("pickup_place"))
+        if err or err2:
+            flash(err or err2)
+            return render_template("new_listing.html", categories=categories, item=item, suggestions=PICKUP_SUGGESTIONS)
         photo_path, photo_error = save_photo(request.files.get("photo"))
         if photo_error:
             flash(photo_error)
-            return render_template("new_listing.html", categories=categories, item=item)
+            return render_template("new_listing.html", categories=categories, item=item, suggestions=PICKUP_SUGGESTIONS)
         new_path = item["image_path"]
         if photo_path:                       # a new photo replaces the old one
             new_path = photo_path
@@ -522,20 +593,20 @@ def edit_listing(listing_id):
         try:
             db.execute(
                 """UPDATE listings SET category_id = ?, title = ?, description = ?, price = ?, condition = ?,
-                          image_path = ?
+                          image_path = ?, course = ?, pickup_place = ?
                    WHERE listing_id = ?""",
                 (f["category_id"], title, f["description"].strip(), int(price), f["condition"],
-                 new_path, listing_id))
+                 new_path, course, pickup, listing_id))
             db.commit()
         except sqlite3.IntegrityError:
             delete_photo(photo_path)
             flash("Invalid category or condition.")
-            return render_template("new_listing.html", categories=categories, item=item)
+            return render_template("new_listing.html", categories=categories, item=item, suggestions=PICKUP_SUGGESTIONS)
         if new_path != item["image_path"]:
             delete_photo(item["image_path"])   # old file is no longer used
         flash("Listing updated.")
         return redirect(url_for("listing", listing_id=listing_id))
-    return render_template("new_listing.html", categories=categories, item=item)
+    return render_template("new_listing.html", categories=categories, item=item, suggestions=PICKUP_SUGGESTIONS)
 
 
 @app.route("/listing/<int:listing_id>/delete", methods=["POST"])
@@ -561,6 +632,56 @@ def my_listings():
         """SELECT l.*, c.name AS category FROM listings l JOIN categories c ON c.category_id = l.category_id
            WHERE l.seller_id = ? ORDER BY l.created_at DESC""", (session["user_id"],)).fetchall()
     return render_template("my_listings.html", listings=rows)
+
+
+# ---------- ratings and feedback ----------
+
+@app.route("/listing/<int:listing_id>/review", methods=["POST"])
+@login_required
+def add_review(listing_id):
+    db = get_db()
+    item = get_listing(listing_id)
+    uid = session["user_id"]
+    ok, reason = can_review(db, item, uid)
+    if not ok:
+        flash(reason)
+        return redirect(url_for("listing", listing_id=listing_id))
+    rating = request.form.get("rating", type=int)
+    comment = request.form.get("comment", "").strip()
+    if rating is None or not 1 <= rating <= 5:
+        flash("Choose a rating from 1 to 5 stars.")
+        return redirect(url_for("listing", listing_id=listing_id) + "#reviews")
+    if len(comment) > MAX_REVIEW_LEN:
+        flash(f"Feedback is too long (max {MAX_REVIEW_LEN} characters).")
+        return redirect(url_for("listing", listing_id=listing_id) + "#reviews")
+    db.execute("INSERT INTO reviews (listing_id, seller_id, reviewer_id, rating, comment) VALUES (?, ?, ?, ?, ?)",
+               (listing_id, item["seller_id"], uid, rating, comment or None))
+    db.commit()
+    flash("Thank you! Your review was saved.")
+    return redirect(url_for("listing", listing_id=listing_id) + "#reviews")
+
+
+@app.route("/seller/<int:user_id>")
+def seller_profile(user_id):
+    db = get_db()
+    seller = db.execute("SELECT user_id, full_name, created_at FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if seller is None:
+        abort(404)
+    summary = db.execute("SELECT ROUND(AVG(rating), 1) AS avg, COUNT(*) AS n FROM reviews WHERE seller_id = ?",
+                         (user_id,)).fetchone()
+    # how many reviews for each star count (5 -> 1)
+    dist = {r["rating"]: r["n"] for r in db.execute(
+        "SELECT rating, COUNT(*) AS n FROM reviews WHERE seller_id = ? GROUP BY rating", (user_id,))}
+    reviews = db.execute(
+        """SELECT r.*, u.full_name AS reviewer, l.title FROM reviews r
+           JOIN users u ON u.user_id = r.reviewer_id JOIN listings l ON l.listing_id = r.listing_id
+           WHERE r.seller_id = ? ORDER BY r.review_id DESC""", (user_id,)).fetchall()
+    sold = db.execute("SELECT COUNT(*) FROM listings WHERE seller_id = ? AND status = 'sold'", (user_id,)).fetchone()[0]
+    active = db.execute(
+        """SELECT l.*, c.name AS category FROM listings l JOIN categories c ON c.category_id = l.category_id
+           WHERE l.seller_id = ? AND l.status = 'active' ORDER BY l.created_at DESC""", (user_id,)).fetchall()
+    return render_template("seller.html", seller=seller, summary=summary, dist=dist, reviews=reviews,
+                           sold=sold, active=active)
 
 
 # ---------- favourites ----------
@@ -592,7 +713,7 @@ def toggle_favourite(listing_id):
 @login_required
 def favourites():
     rows = get_db().execute(
-        """SELECT l.*, c.name AS category, u.full_name AS seller
+        f"""SELECT l.*, c.name AS category, u.full_name AS seller, {SELLER_AVG_SQL}, {SELLER_N_SQL}
            FROM favourites f JOIN listings l ON l.listing_id = f.listing_id
            JOIN categories c ON c.category_id = l.category_id
            JOIN users u ON u.user_id = l.seller_id

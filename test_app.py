@@ -1,5 +1,5 @@
 """Automated tests for the main user process.  Run:  python -m pytest -v
-Each test = one test case (TC) from the Status Check Pack. 63 test cases: TC-01 ... TC-63."""
+Each test = one test case (TC) from the Status Check Pack. 77 test cases: TC-01 ... TC-77."""
 import os
 import sqlite3
 import tempfile
@@ -496,10 +496,111 @@ def test_tc51_update_schema_keeps_users(client):
 
 
 
-# ---------- Week 13: TC-52 ... TC-61 (10 new tests) + TC-62 (end-to-end) ----------
+# ---------- ratings, feedback, campus fields (TC-52 ... TC-62) ----------
+
+def review_form(rating="5", comment="Great seller"):
+    return {"rating": rating, "comment": comment}
+
+
+def test_tc52_buyer_can_review_sold_listing(client):
+    # listing 1 is sold; madina wrote about it, so she may review aruzhan
+    login(client)
+    client.post("/listing/1/sold")
+    client.get("/logout")
+    login(client, email="madina@kbtu.kz")
+    assert b"Rate the seller" in client.get("/listing/1").data
+    r = client.post("/listing/1/review", data=review_form("4", "Pickup was easy"), follow_redirects=True)
+    assert b"review was saved" in r.data and b"Pickup was easy" in r.data
+    assert count_rows("SELECT rating FROM reviews WHERE listing_id = 1 AND reviewer_id = 3") == 4
+
+
+def test_tc53_cannot_review_unsold_listing(client):
+    login(client, email="madina@kbtu.kz")            # listing 1 is still active
+    r = client.post("/listing/1/review", data=review_form(), follow_redirects=True)
+    assert b"after the item is sold" in r.data
+    assert count_rows("SELECT COUNT(*) FROM reviews WHERE listing_id = 1") == 0
+
+
+def test_tc54_seller_cannot_review_self(client):
+    login(client, email="dias@kbtu.kz")              # dias sold listing 4
+    r = client.post("/listing/4/review", data=review_form(), follow_redirects=True)
+    assert b"Only buyers can review" in r.data
+    assert count_rows("SELECT COUNT(*) FROM reviews WHERE reviewer_id = 2") == 0
+
+
+def test_tc55_stranger_cannot_review(client):
+    login(client, email="timur@kbtu.kz")             # never wrote about sold listing 4
+    r = client.post("/listing/4/review", data=review_form(), follow_redirects=True)
+    assert b"messaged the seller" in r.data
+
+
+def test_tc56_one_review_per_deal(client):
+    login(client)                                    # seed: aruzhan already reviewed listing 4
+    db = sqlite3.connect(marketplace.DB_PATH)
+    db.execute("INSERT INTO messages (listing_id, sender_id, receiver_id, text) VALUES (4, 1, 2, 'hi')")
+    db.commit(); db.close()
+    r = client.post("/listing/4/review", data=review_form("1"), follow_redirects=True)
+    assert b"already reviewed" in r.data
+    assert count_rows("SELECT COUNT(*) FROM reviews WHERE listing_id = 4 AND reviewer_id = 1") == 1
+
+
+def test_tc57_rating_must_be_1_to_5(client):
+    login(client)
+    client.post("/listing/1/sold")
+    client.get("/logout")
+    login(client, email="madina@kbtu.kz")
+    for bad in ("0", "6", "abc", ""):
+        r = client.post("/listing/1/review", data=review_form(bad), follow_redirects=True)
+        assert b"1 to 5" in r.data
+    assert count_rows("SELECT COUNT(*) FROM reviews WHERE listing_id = 1") == 0
+
+
+def test_tc58_review_requires_login_and_csrf(client):
+    r = client.post("/listing/4/review", data=review_form())
+    assert r.status_code == 302 and "/login" in r.headers["Location"]
+    marketplace.app.config["CSRF_ENABLED"] = True
+    try:
+        login_page = client.get("/login")
+        r = client.post("/listing/4/review", data=review_form())
+        assert r.status_code == 400
+    finally:
+        marketplace.app.config["CSRF_ENABLED"] = False
+
+
+def test_tc59_average_rating_shown(client):
+    # seed: dias has one review (5 stars) -> shown on his seller page and on his listing card
+    page = client.get("/seller/2").data
+    assert b"Great" not in page and b"5.0" in page and b"Charger was exactly as described" in page
+    assert b"5.0" in client.get("/?q=mouse").data
+    assert client.get("/seller/9999").status_code == 404
+
+
+def test_tc60_course_and_pickup_saved_and_filtered(client):
+    login(client)
+    client.post("/listing/new", data=listing_form(title="Linear algebra notes", course="math 201",
+                                                  pickup_place="Library"))
+    assert count_rows("SELECT COUNT(*) FROM listings WHERE title='Linear algebra notes' AND course='MATH201' "
+                      "AND pickup_place='Library'") == 1
+    r = client.get("/?course=MATH201").data
+    assert b"Linear algebra notes" in r and b"Calculus textbook" not in r and b"Library" in r
+
+
+def test_tc61_bad_course_rejected(client):
+    login(client)
+    r = client.post("/listing/new", data=listing_form(title="Bad course", course="<script>"), follow_redirects=True)
+    assert b"letters and digits only" in r.data
+    assert count_rows("SELECT COUNT(*) FROM listings WHERE title = 'Bad course'") == 0
+
+
+def test_tc62_sort_best_rated_sellers(client):
+    html = client.get("/?sort=rating").data.decode("utf-8")
+    assert html.index("Python tutoring") < html.index("Calculus textbook")   # aigerim has a review, aruzhan none
+
+
+# ---------- Week 13 (Altyngul): TC-63 ... TC-77 (incl. TC-73 end-to-end) ----------
 # Altyngul: these tests cover the branches that were not tested yet (coverage 92% -> 95%+).
 
-def test_tc52_old_database_is_upgraded(client):
+def test_tc63_old_database_is_upgraded(client):
     # Reliability: an old marketplace.db without image_path / is_read is upgraded and old messages count as read
     fd, old = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -525,7 +626,7 @@ def test_tc52_old_database_is_upgraded(client):
     assert is_read == 1
 
 
-def test_tc53_image_type_is_detected_by_first_bytes(client):
+def test_tc64_image_type_is_detected_by_first_bytes(client):
     # Security: the file type comes from the content, not from the file name
     assert marketplace.detect_image_ext(b"\xff\xd8\xff\xe0" + b"0" * 8) == "jpg"
     assert marketplace.detect_image_ext(PNG[:12]) == "png"
@@ -535,7 +636,7 @@ def test_tc53_image_type_is_detected_by_first_bytes(client):
     assert marketplace.detect_image_ext(b"") is None
 
 
-def test_tc54_too_big_photo_rejected(client):
+def test_tc65_too_big_photo_rejected(client):
     # Photos: a file above the size limit is rejected with a message, no listing and no file are created
     login(client)
     limit = marketplace.app.config["MAX_CONTENT_LENGTH"]
@@ -550,7 +651,7 @@ def test_tc54_too_big_photo_rejected(client):
     assert os.listdir(marketplace.UPLOAD_DIR) == []
 
 
-def test_tc55_register_validation_and_duplicate_email(client):
+def test_tc66_register_validation_and_duplicate_email(client):
     # US-1: empty fields are rejected; the same email cannot be used twice; nothing extra is saved
     before = count_rows("SELECT COUNT(*) FROM users")
     r = client.post("/register", data={"student_id": "", "full_name": "", "email": "", "password": ""})
@@ -560,7 +661,7 @@ def test_tc55_register_validation_and_duplicate_email(client):
     assert count_rows("SELECT COUNT(*) FROM users") == before
 
 
-def test_tc56_login_redirects_only_to_local_pages(client):
+def test_tc67_login_redirects_only_to_local_pages(client):
     # Security: after login the user goes to `next` only if it is a local path (no open redirect)
     r = client.post("/login?next=/inbox", data={"email": "aruzhan@kbtu.kz", "password": "password123"})
     assert r.status_code == 302 and r.headers["Location"].endswith("/inbox")
@@ -571,7 +672,7 @@ def test_tc56_login_redirects_only_to_local_pages(client):
     assert marketplace.safe_next(None) == "/"
 
 
-def test_tc57_message_edge_cases(client):
+def test_tc68_message_edge_cases(client):
     # US-5: anonymous user -> login; empty text is not saved; the seller can reply to a buyer who wrote
     before = count_rows("SELECT COUNT(*) FROM messages")
     r = client.post("/listing/1", data={"text": "hello"})                  # not logged in
@@ -586,7 +687,7 @@ def test_tc57_message_edge_cases(client):
     assert count_rows("SELECT COUNT(*) FROM messages WHERE text = 'See you at 5pm' AND receiver_id = 3 AND is_read = 0") == 1
 
 
-def test_tc58_invalid_category_rejected_and_photo_cleaned(client):
+def test_tc69_invalid_category_rejected_and_photo_cleaned(client):
     # US-3 + photos: a wrong category gives an error, no listing is saved and the uploaded file is removed
     login(client)
     r = client.post("/listing/new", data={"title": "Wrong category", "category_id": "999", "price": "100",
@@ -598,7 +699,7 @@ def test_tc58_invalid_category_rejected_and_photo_cleaned(client):
     assert os.listdir(marketplace.UPLOAD_DIR) == []
 
 
-def test_tc59_edit_validation_keeps_old_data(client):
+def test_tc70_edit_validation_keeps_old_data(client):
     # Edit: empty title, bad photo and wrong condition are rejected; the listing stays unchanged
     login(client)  # aruzhan owns listing 1
     r = client.post("/listing/1/edit", data=listing_form(title="  "))
@@ -612,7 +713,7 @@ def test_tc59_edit_validation_keeps_old_data(client):
     assert client.get("/listing/1/edit").status_code == 200
 
 
-def test_tc60_unknown_listing_gives_404_everywhere(client):
+def test_tc71_unknown_listing_gives_404_everywhere(client):
     # Reliability: every action on a listing that does not exist returns 404, never a crash
     login(client)
     assert client.post("/listing/9999/sold").status_code == 404
@@ -623,7 +724,7 @@ def test_tc60_unknown_listing_gives_404_everywhere(client):
     marketplace.delete_photo(None)
 
 
-def test_tc61_inbox_groups_chats_and_counts_unread(client):
+def test_tc72_inbox_groups_chats_and_counts_unread(client):
     # Messages: one chat = one listing + one other person; the inbox counts only unread messages sent to me
     login(client, email="madina@kbtu.kz")
     client.post("/listing/1", data={"text": "Second question"})
@@ -636,7 +737,7 @@ def test_tc61_inbox_groups_chats_and_counts_unread(client):
     assert count_rows("SELECT COUNT(*) FROM messages WHERE receiver_id = 1 AND is_read = 0") == 0
 
 
-def test_tc62_end_to_end_full_process(client):
+def test_tc73_end_to_end_full_process(client):
     # End-to-end: register -> log in -> post listing -> search -> message seller -> reply -> mark as sold -> Stats
     # seller registers and posts a listing (with a photo)
     assert b"Your account was created" in register(client, sid="24B111111", email="seller@kbtu.kz").data
@@ -667,10 +768,38 @@ def test_tc62_end_to_end_full_process(client):
     assert client.get("/stats").status_code == 200
 
 
-def test_tc63_sort_and_filter_ignore_bad_values(client):
+def test_tc74_sort_and_filter_ignore_bad_values(client):
     # Search: an unknown sort value or condition is ignored (never put into the SQL) and the page still works
     r = client.get("/?sort=price%3B%20DROP%20TABLE%20users&condition=broken")
     assert r.status_code == 200
     assert count_rows("SELECT COUNT(*) FROM users") == 10
     html = client.get("/?sort=newest&condition=new").data.decode("utf-8")
     assert "Python tutoring" in html and "Calculus textbook" not in html
+
+
+def test_tc75_review_text_too_long_rejected(client):
+    # Reviews: feedback above 500 characters is rejected and no review is saved
+    login(client)
+    client.post("/listing/1/sold")
+    client.get("/logout")
+    login(client, email="madina@kbtu.kz")
+    r = client.post("/listing/1/review", data=review_form("5", "x" * 501), follow_redirects=True)
+    assert b"too long" in r.data
+    assert count_rows("SELECT COUNT(*) FROM reviews WHERE listing_id = 1") == 0
+
+
+def test_tc76_campus_fields_validated_on_create_and_edit(client):
+    # Campus fields: a too long pickup place and a bad course code are rejected; the old data stays
+    login(client)
+    r = client.post("/listing/new", data=listing_form(title="Long pickup", pickup_place="P" * 41), follow_redirects=True)
+    assert b"at most 40" in r.data
+    assert count_rows("SELECT COUNT(*) FROM listings WHERE title = 'Long pickup'") == 0
+    r = client.post("/listing/1/edit", data=listing_form(title="Calculus textbook, Stewart 8th ed", course="<b>"))
+    assert b"letters and digits only" in r.data
+    assert count_rows("SELECT course FROM listings WHERE listing_id = 1") == "MATH101"
+
+
+def test_tc77_register_page_opens(client):
+    # US-1: the registration form is available without login
+    r = client.get("/register")
+    assert r.status_code == 200 and b"Student ID" in r.data
