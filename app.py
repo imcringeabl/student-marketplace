@@ -106,8 +106,25 @@ def migrate_db():
         db.close()
 
 
+def update_schema():
+    """Add missing tables and indexes WITHOUT deleting any users or listings.
+    Takes schema.sql, removes the DROP TABLE lines and makes every CREATE safe (IF NOT EXISTS)."""
+    with open(os.path.join(BASE_DIR, "schema.sql"), encoding="utf-8") as f:
+        lines = [ln for ln in f.read().splitlines() if not ln.strip().upper().startswith("DROP TABLE")]
+    sql = "\n".join(lines)
+    for word in ("CREATE TABLE ", "CREATE UNIQUE INDEX ", "CREATE INDEX "):
+        sql = sql.replace(word, word + "IF NOT EXISTS ")
+    db = sqlite3.connect(DB_PATH)
+    try:
+        db.executescript(sql)
+        db.commit()
+    finally:
+        db.close()
+
+
 if os.path.exists(DB_PATH):
-    migrate_db()
+    migrate_db()        # add missing columns to old tables
+    update_schema()     # add missing tables / indexes, keep all data
 
 
 # ---------- photo helpers ----------
@@ -191,6 +208,8 @@ def index():
     q = request.args.get("q", "").strip()
     category = request.args.get("category", "")
     max_price = request.args.get("max_price", "").strip()
+    condition = request.args.get("condition", "")
+    sort = request.args.get("sort", "price_asc")
 
     sql = """SELECT l.*, c.name AS category, u.full_name AS seller
              FROM listings l
@@ -207,7 +226,15 @@ def index():
     if max_price.isdigit():
         sql += " AND l.price <= ?"
         params.append(int(max_price))
-    sql += " ORDER BY l.price"
+    if condition in ("new", "used"):
+        sql += " AND l.condition = ?"
+        params.append(condition)
+    # only these fixed values can go into ORDER BY (user text is never put into the SQL)
+    order = {"price_asc": "l.price ASC", "price_desc": "l.price DESC",
+             "newest": "l.created_at DESC, l.listing_id DESC"}
+    if sort not in order:
+        sort = "price_asc"
+    sql += " ORDER BY " + order[sort]
 
     listings = db.execute(sql, params).fetchall()
     # categories with the number of active listings (shown on the filter chips)
@@ -215,9 +242,10 @@ def index():
         """SELECT c.*, COUNT(l.listing_id) AS n FROM categories c
            LEFT JOIN listings l ON l.category_id = c.category_id AND l.status = 'active'
            GROUP BY c.category_id ORDER BY c.name""").fetchall()
-    grouped = not (q or category or max_price)   # home page = sections by category
+    grouped = not (q or category or max_price or condition or sort != "price_asc")   # home page = sections by category
     return render_template("index.html", listings=listings, categories=categories,
-                           q=q, category=category, max_price=max_price, grouped=grouped)
+                           q=q, category=category, max_price=max_price, grouped=grouped,
+                           condition=condition, sort=sort)
 
 
 # ---------- validation helpers ----------
