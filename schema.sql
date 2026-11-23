@@ -3,6 +3,7 @@
 
 PRAGMA foreign_keys = ON;
 
+DROP TABLE IF EXISTS login_attempts;
 DROP TABLE IF EXISTS favourites;
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS listings;
@@ -34,6 +35,7 @@ CREATE TABLE listings (
     condition   TEXT    NOT NULL CHECK (condition IN ('new', 'used')),
     status      TEXT    NOT NULL DEFAULT 'active'
                         CHECK (status IN ('active', 'sold', 'hidden')),
+    image_path  TEXT,                                         -- photo, e.g. uploads/ab12.jpg (file lives in static/)
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -44,6 +46,7 @@ CREATE TABLE messages (
     receiver_id INTEGER NOT NULL REFERENCES users(user_id),
     text        TEXT    NOT NULL,
     sent_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    is_read     INTEGER NOT NULL DEFAULT 0 CHECK (is_read IN (0, 1)),   -- 0 = receiver has not opened it yet
     CHECK (sender_id <> receiver_id)
 );
 
@@ -55,8 +58,19 @@ CREATE TABLE favourites (
     UNIQUE (user_id, listing_id)      -- the same listing cannot be saved twice
 );
 
+-- Failed logins, used to lock an email after too many wrong passwords (brute-force protection)
+CREATE TABLE login_attempts (
+    attempt_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    email        TEXT    NOT NULL,
+    ip           TEXT,
+    attempted_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Indexes for the most common searches
 CREATE INDEX idx_listings_category_price ON listings(category_id, price);
 CREATE INDEX idx_listings_status         ON listings(status);
 CREATE INDEX idx_messages_listing        ON messages(listing_id);
 CREATE INDEX idx_favourites_user          ON favourites(user_id);
+CREATE INDEX idx_login_attempts_email    ON login_attempts(email, attempted_at);
+CREATE INDEX idx_messages_sender         ON messages(sender_id, sent_at);
+CREATE INDEX idx_messages_unread         ON messages(receiver_id, is_read);
