@@ -49,3 +49,15 @@ INSERT INTO favourites (user_id, listing_id) VALUES
  (1, 3),
  (1, 5),
  (2, 3);
+
+-- campus details for some listings
+UPDATE listings SET course = 'MATH101', pickup_place = 'Library'   WHERE listing_id IN (1, 2);
+UPDATE listings SET course = 'CSCI230', pickup_place = 'Main hall' WHERE listing_id = 7;
+UPDATE listings SET course = 'PHYS101', pickup_place = 'Dorm 2'    WHERE listing_id = 16;
+UPDATE listings SET course = 'MATH101', pickup_place = 'Canteen'   WHERE listing_id = 17;
+UPDATE listings SET course = 'MATH201', pickup_place = 'Library'   WHERE listing_id = 20;
+
+-- reviews for finished deals (listing 4 and 9 are sold)
+INSERT INTO reviews (listing_id, seller_id, reviewer_id, rating, comment) VALUES
+ (4, 2, 1, 5, 'Charger was exactly as described, met on time.'),
+ (9, 5, 3, 4, 'Kettle works fine, a bit late to the meeting.');
