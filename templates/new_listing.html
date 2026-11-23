@@ -1,16 +1,35 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="panel narrow">
-  <h2>Sell an item</h2>
-  <form method="post">{{ csrf_field() }}
-    <label>Title</label><input name="title" required>
+  <h2>{{ 'Edit listing' if item else 'Sell an item' }}</h2>
+  <form method="post" enctype="multipart/form-data">{{ csrf_field() }}
+    <label>Title</label><input name="title" maxlength="100" required value="{{ item.title if item }}">
     <label>Category</label>
-    <select name="category_id">{% for c in categories %}<option value="{{ c.category_id }}">{{ c.name }}</option>{% endfor %}</select>
-    <label>Price, ₸</label><input name="price" type="number" min="0" required>
+    <select name="category_id">{% for c in categories %}<option value="{{ c.category_id }}" {{ 'selected' if item and item.category_id == c.category_id }}>{{ c.name }}</option>{% endfor %}</select>
+    <label>Price, ₸</label><input name="price" type="number" min="0" required value="{{ item.price if item }}">
     <label>Condition</label>
-    <select name="condition"><option value="used">used</option><option value="new">new</option></select>
-    <label>Description</label><textarea name="description" rows="3"></textarea>
-    <p><button>Publish</button></p>
+    <select name="condition"><option value="used" {{ 'selected' if item and item.condition == 'used' }}>used</option><option value="new" {{ 'selected' if item and item.condition == 'new' }}>new</option></select>
+    <label>Course (optional)</label><input name="course" maxlength="12" placeholder="e.g. MATH101" value="{{ item.course if item and item.course }}">
+    <p class="hint">Students can filter by course, so the right book finds the right person.</p>
+    <label>Pickup place on campus (optional)</label><input name="pickup_place" maxlength="40" list="places" placeholder="e.g. Library" value="{{ item.pickup_place if item and item.pickup_place }}">
+    <datalist id="places">{% for p in suggestions or [] %}<option value="{{ p }}">{% endfor %}</datalist>
+    <label for="photo">Photo (optional)</label>
+    {% if item and item.image_path %}<img class="preview" src="{{ url_for('static', filename=item.image_path) }}" alt="Current photo">
+    <label class="check"><input type="checkbox" name="remove_photo" value="1"> Remove current photo</label>{% endif %}
+    <input id="photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+    <p class="hint">JPG, PNG, WEBP or GIF, up to 5 MB.{% if item and item.image_path %} Choosing a new file replaces the current photo.{% endif %}</p>
+    <img id="photoPreview" class="preview" alt="" hidden>
+    <label>Description</label><textarea name="description" rows="3">{{ item.description if item and item.description }}</textarea>
+    <p><button>{{ 'Save changes' if item else 'Publish' }}</button>
+      {% if item %}<a class="btn ghost-grey" href="{{ url_for('listing', listing_id=item.listing_id) }}">Cancel</a>{% endif %}</p>
   </form>
 </div>
+<script>
+document.getElementById('photo').addEventListener('change', function () {
+  var img = document.getElementById('photoPreview'), f = this.files[0];
+  if (!f) { img.hidden = true; return; }
+  if (f.size > 5 * 1024 * 1024) { alert('File is too large. Maximum size is 5 MB.'); this.value = ''; img.hidden = true; return; }
+  img.src = URL.createObjectURL(f); img.hidden = false;
+});
+</script>
 {% endblock %}

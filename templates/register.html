@@ -3,10 +3,10 @@
 <div class="panel narrow">
   <h2>Create an account</h2>
   <form method="post">{{ csrf_field() }}
-    <label>Student ID</label><input name="student_id" placeholder="24B031936" required>
+    <label>Student ID</label><input name="student_id" placeholder="24B031936" pattern="\d{2}[A-Za-z]\d{6}" required>
     <label>Full name</label><input name="full_name" required>
-    <label>University email</label><input name="email" type="email" required>
-    <label>Password (min 6 characters)</label><input name="password" type="password" minlength="6" required>
+    <label>University email (@kbtu.kz)</label><input name="email" type="email" pattern=".+@kbtu\.kz" placeholder="name@kbtu.kz" required>
+    <label>Password (min 8 characters, letters and digits)</label><input name="password" type="password" minlength="8" required>
     <p><button>Register</button></p>
   </form>
 </div>

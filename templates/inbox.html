@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon with context %}
+{% block title %}Messages · Student Marketplace{% endblock %}
+{% block content %}
+<h2 style="margin-bottom:14px">{{ icon('chat', 22) }} My messages</h2>
+{% for c in chats %}
+  <a class="chat {{ 'unread' if c.unread }}" href="{{ c.url }}">
+    <div class="pic">{% if c.image_path %}<img src="{{ url_for('static', filename=c.image_path) }}" alt="">{% else %}{{ icon('tag', 24) }}{% endif %}</div>
+    <div class="txt">
+      <b>{{ c.title }}</b>
+      <span class="muted">with {{ c.other_name }}</span>
+      <span class="last muted">{{ 'You: ' if c.last_mine }}{{ c.last_text }}</span>
+    </div>
+    <div class="meta">
+      <span>{{ c.last_at[:16] }}</span>
+      {% if c.unread %}<span class="badge">{{ c.unread }} new</span>{% endif %}
+    </div>
+  </a>
+{% else %}
+  <div class="panel empty">{{ icon('chat', 36) }}<p>No messages yet. Open a listing and write to the seller, or wait for a buyer to write to you.</p>
+  <a class="btn" href="{{ url_for('index') }}">Browse listings</a></div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, card, stars with context %}
+{% block title %}{{ seller.full_name }} · Student Marketplace{% endblock %}
+{% block content %}
+<div class="panel">
+  <h2>{{ seller.full_name }}</h2>
+  <p class="muted">Verified KBTU student · member since {{ seller.created_at[:10] }} · {{ sold }} item(s) sold</p>
+  <p style="font-size:20px">{{ stars(summary.avg, summary.n) }}</p>
+  {% if summary.n %}
+  <div class="bars">
+    {% for i in [5,4,3,2,1] %}{% set n = dist.get(i, 0) %}
+    <div class="row"><span>{{ i }} ★</span><span class="meter"><i style="width:{{ (n * 100 / summary.n)|round|int }}%"></i></span><span class="muted">{{ n }}</span></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="panel" style="margin-top:16px">
+  <h3>Feedback from buyers</h3>
+  {% for r in reviews %}
+    <div class="review"><span class="rate"><span class="st">{{ '★' * r.rating }}{{ '☆' * (5 - r.rating) }}</span></span> <b>{{ r.reviewer }}</b>
+      <span class="muted">· {{ r.title }} · {{ r.created_at[:10] }}</span>{% if r.comment %}<br>{{ r.comment }}{% endif %}</div>
+  {% else %}<p class="muted">No reviews yet.</p>{% endfor %}
+</div>
+
+{% if active %}
+<h3 style="margin:18px 0 8px">Active listings</h3>
+<div class="grid">{% for l in active %}{{ card(l) }}{% endfor %}</div>
+{% endif %}
+{% endblock %}

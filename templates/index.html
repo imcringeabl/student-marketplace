@@ -6,6 +6,21 @@
   <form class="search" method="get">
     <input class="q" name="q" placeholder="Keyword, e.g. textbook" value="{{ q }}">
     <input name="max_price" placeholder="Max price, ₸" value="{{ max_price }}" inputmode="numeric">
+    <select name="condition">
+      <option value="">Any condition</option>
+      <option value="new" {{ 'selected' if condition == 'new' }}>New</option>
+      <option value="used" {{ 'selected' if condition == 'used' }}>Used</option>
+    </select>
+    <select name="sort">
+      <option value="price_asc" {{ 'selected' if sort == 'price_asc' }}>Cheapest first</option>
+      <option value="price_desc" {{ 'selected' if sort == 'price_desc' }}>Most expensive first</option>
+      <option value="newest" {{ 'selected' if sort == 'newest' }}>Newest first</option>
+      <option value="rating" {{ 'selected' if sort == 'rating' }}>Best-rated sellers</option>
+    </select>
+    <select name="course" aria-label="Course">
+      <option value="">Any course</option>
+      {% for c in courses %}<option value="{{ c }}" {{ 'selected' if course == c }}>{{ c }}</option>{% endfor %}
+    </select>
     {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
     <button style="background:var(--sell)">{{ icon('search') }} Search</button>
   </form>
@@ -22,7 +37,7 @@
   {% for name, items in listings|groupby('category') %}{{ section(name, items) }}{% endfor %}
   {% if not listings %}<div class="empty">Nothing listed yet.</div>{% endif %}
 {% else %}
-  <p class="muted">{{ listings|length }} active listing(s), cheapest first</p>
+  <p class="muted">{{ listings|length }} active listing(s)</p>
   <div class="grid">
     {% for l in listings %}{{ card(l) }}{% else %}<div class="empty">Nothing found. Try another filter.</div>{% endfor %}
   </div>

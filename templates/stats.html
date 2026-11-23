@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, slug with context %}
+{% block title %}Statistics · Student Marketplace{% endblock %}
+{% block content %}
+<h2 style="margin-bottom:16px">{{ icon('grid', 22) }} Marketplace statistics</h2>
+
+<div class="stat-row">
+  <div class="panel stat"><div class="muted">Students</div><div class="num">{{ s.totals.users }}</div></div>
+  <div class="panel stat"><div class="muted">Listings</div><div class="num">{{ s.totals.listings }}</div></div>
+  <div class="panel stat"><div class="muted">Active</div><div class="num">{{ s.by_status.get('active', 0) }}</div></div>
+  <div class="panel stat"><div class="muted">Sold</div><div class="num">{{ s.by_status.get('sold', 0) }}</div></div>
+  <div class="panel stat"><div class="muted">Hidden</div><div class="num">{{ s.by_status.get('hidden', 0) }}</div></div>
+  <div class="panel stat"><div class="muted">Messages</div><div class="num">{{ s.totals.messages }}</div></div>
+</div>
+
+<div class="panel" style="margin-top:16px">
+  <h3>Active listings by category</h3>
+  <div class="scroll">
+  <table class="stats">
+    <tr><th>Category</th><th>Active</th><th>Average, ₸</th><th>Lowest, ₸</th><th>Highest, ₸</th></tr>
+    {% for c in s.by_category %}
+    <tr class="c-{{ slug(c.name) }}">
+      <td><span class="tag">{{ c.name }}</span></td>
+      <td>{{ c.active }}</td>
+      <td>{{ "{:,}".format(c.avg_price) if c.avg_price is not none else "—" }}</td>
+      <td>{{ "{:,}".format(c.min_price) if c.min_price is not none else "—" }}</td>
+      <td>{{ "{:,}".format(c.max_price) if c.max_price is not none else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:16px">
+  <h3>{{ icon('heart') }} Most saved to favourites</h3>
+  <table class="stats">
+    <tr><th>Listing</th><th>Saved, times</th></tr>
+    {% for t in s.top_favourites %}
+    <tr><td><a href="{{ url_for('listing', listing_id=t.listing_id) }}">{{ t.title }}</a></td><td>{{ t.saves }}</td></tr>
+    {% else %}
+    <tr><td colspan="2" class="muted">No favourites yet</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<style>
+  .stat-row { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:12px; }
+  .stat { padding:14px 16px; }
+  .stat .num { font-size:28px; font-weight:800; }
+  .scroll { overflow-x:auto; }
+  table.stats { width:100%; border-collapse:collapse; margin-top:8px; }
+  table.stats th, table.stats td { padding:9px 10px; border-bottom:1px solid var(--line); text-align:left; }
+  table.stats th { color:var(--muted); font-size:13px; font-weight:600; }
+  table.stats td:not(:first-child), table.stats th:not(:first-child) { text-align:right; }
+</style>
+{% endblock %}
