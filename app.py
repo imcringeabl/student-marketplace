@@ -4,6 +4,7 @@ import re
 import secrets
 import sqlite3
 import uuid
+from datetime import timedelta
 from functools import wraps
 
 from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
@@ -36,6 +37,36 @@ MAX_PICKUP_LEN = 40
 PICKUP_SUGGESTIONS = ["Library", "Main hall", "Canteen", "Dorm 1", "Dorm 2", "Sports hall"]
 MAX_TITLE_LEN = 100           # BUG-03: very long titles broke the listing page on phones
 app.config["CSRF_ENABLED"] = True   # tests switch it off; test_tc39 checks it
+
+# ---------- cookie / session protection ----------
+app.config.update(
+    SESSION_COOKIE_NAME="sm_session",
+    SESSION_COOKIE_HTTPONLY=True, 
+    SESSION_COOKIE_SAMESITE="Lax", 
+    SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "0") == "1",
+    SESSION_REFRESH_EACH_REQUEST=True,
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=2), 
+)
+
+
+@app.before_request
+def make_session_expire():
+    session.permanent = True      
+
+
+@app.after_request
+def security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "same-origin")
+    resp.headers.setdefault("Content-Security-Policy",
+                            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+                            "script-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
+    if request.path.startswith(("/login", "/register", "/inbox", "/my", "/favourites")):
+        resp.headers["Cache-Control"] = "no-store"
+    if app.config["SESSION_COOKIE_SECURE"]:
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return resp
 
 
 # ---------- CSRF protection ----------
@@ -769,4 +800,4 @@ def stats():
 if __name__ == "__main__":
     if not os.path.exists(DB_PATH):
         init_db()
-    app.run(debug=True)
+    app.run(debug=os.environ.get("FLASK_DEBUG", "0") == "1")

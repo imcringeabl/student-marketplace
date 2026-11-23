@@ -11,7 +11,7 @@ Open http://127.0.0.1:5000 . The database `marketplace.db` is created on first s
 Test accounts: aruzhan@kbtu.kz, dias@kbtu.kz, madina@kbtu.kz ... password `password123`.
 
 ## Tests
-    python -m pytest -v      # 77 test cases, TC-01 ... TC-77
+    python -m pytest -v      # 79 test cases, TC-01 ... TC-79
 
 ## Files
 - app.py — routes (Flask), one function per user story (US-1 ... US-7)
@@ -77,3 +77,10 @@ average / lowest / highest price per category, top 3 listings saved to favourite
 ## Continuous integration
 GitHub Actions (`.github/workflows/tests.yml`) runs all tests on every push and pull request and fails if coverage is below 95%:
     python -m pytest -v --cov=app --cov-report=term-missing --cov-fail-under=95
+- TC-78 ... TC-79 — session cookie flags (HttpOnly, SameSite) and security headers.
+
+## Cookie protection
+- Session cookie `sm_session`: `HttpOnly` (JS cannot read it), `SameSite=Lax` (not sent on cross-site POST), `Secure` when `COOKIE_SECURE=1` (set it when running over HTTPS).
+- Session lasts 2 hours of inactivity (`PERMANENT_SESSION_LIFETIME`); logout clears it.
+- Headers: `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Content-Security-Policy`, `Referrer-Policy`, `Cache-Control: no-store` on private pages, HSTS when Secure is on.
+- Set a real `SECRET_KEY` env variable in production; debug mode only with `FLASK_DEBUG=1`.

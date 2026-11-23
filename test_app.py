@@ -1,5 +1,5 @@
 """Automated tests for the main user process.  Run:  python -m pytest -v
-Each test = one test case (TC) from the Status Check Pack. 77 test cases: TC-01 ... TC-77."""
+Each test = one test case (TC) from the Status Check Pack. 79 test cases: TC-01 ... TC-79."""
 import os
 import sqlite3
 import tempfile
@@ -803,3 +803,19 @@ def test_tc77_register_page_opens(client):
     # US-1: the registration form is available without login
     r = client.get("/register")
     assert r.status_code == 200 and b"Student ID" in r.data
+
+
+# ---------- Cookie / session protection: TC-78 ... TC-79 ----------
+
+def test_tc78_session_cookie_flags(client):
+    cookie = client.get("/login").headers.get("Set-Cookie", "")
+    assert "HttpOnly" in cookie
+    assert "SameSite=Lax" in cookie
+    assert cookie.startswith("sm_session=")
+
+
+def test_tc79_security_headers(client):
+    h = client.get("/").headers
+    assert h["X-Content-Type-Options"] == "nosniff"
+    assert h["X-Frame-Options"] == "DENY"
+    assert "frame-ancestors 'none'" in h["Content-Security-Policy"]
